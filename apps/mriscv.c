@@ -1,7 +1,7 @@
 #include <stdarg.h>
 #include "mriscv.h"
 
-static uint32_t * volatile const __attribute__ ((used)) UART_TXDATA = (uint32_t *)0x00001000;
+static uint32_t * const __attribute__ ((used)) UART_TXDATA = (uint32_t *)0x00001000;
 
 uint32_t strlen(const char *s) {
     unsigned n = 0;

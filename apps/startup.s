@@ -2,7 +2,7 @@
 .text
 
 _start:
-    lui sp, 0x220
+    lui sp, 0x80004
     call main
 	nop
 	nop

@@ -6,7 +6,7 @@
     `endif
 `endif
 
-`define PC_RESET        32'h00100000
+`define PC_RESET        32'h20400000
 `define MTIME_ADDR      29'h400
 `define MTIMECMP_ADDR   29'h401
 `define MSIP_ADDR       30'h804
