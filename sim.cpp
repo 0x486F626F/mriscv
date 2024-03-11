@@ -108,7 +108,7 @@ class SimulatedRAM {
                 icache_state = 0;
                 debug("icache: read byte @ %08x = %08x\n",
                       core->icache_addr, core->icache_data);
-                //schedule_next_icache_rdy(1);
+                schedule_next_icache_rdy(1);
             } else icache_next_rdy--;
         }
 
@@ -140,7 +140,10 @@ class SimulatedRAM {
                 {
                     if (addr == uart_txdata_addr_r) {
                         if (!system_init) core->dcache_rdata = -1;
-                        else core->dcache_rdata = '1';
+                        else {
+                            core->dcache_rdata = getchar();
+                            core->dcache_rdy = 1;
+                        }
                         system_init ++;
                     } 
                     else if (addr == uart_txdata_addr_w) {
@@ -167,7 +170,7 @@ class SimulatedRAM {
                             addr -= itim_addr;
                             assert(addr < itim.capacity());
                         } else {
-                            printf("unknown %x", addr);
+                            printf("unknown %x\n", addr);
                         }
 
                         if (m) {
