@@ -24,6 +24,7 @@ const uint32_t uart_txdata_addr = 0x10013000;
 const uint32_t uart_txdata_addr_w = 0x10013000;
 const uint32_t uart_txdata_addr_r = 0x10013004;
 
+const uint32_t clint_addr = 0x02000000;
 const uint32_t itim_addr = 0x08000000;
 const uint32_t rom_addr = 0x20000000;
 const uint32_t ram_addr = 0x80000000;
@@ -36,6 +37,7 @@ double sc_time_stamp() {
 
 class SimulatedRAM {
     std::shared_ptr<Vcore> core;
+    std::vector<uint8_t> clint;
     std::vector<uint8_t> itim;
     std::vector<uint8_t> rom;
     std::vector<uint8_t> memory;
@@ -46,6 +48,8 @@ class SimulatedRAM {
     int icache_state; // 0 -> reset; 1 -> reading
     int dcache_state; // 0 -> reset; 1 -> reading/writing
 
+    int irq_flag;
+
     public:
     SimulatedRAM(std::shared_ptr<Vcore> core, 
             size_t itim_cap,
@@ -54,11 +58,13 @@ class SimulatedRAM {
             core(core), capacity(ram_cap),
             icache_next_rdy(0),
             dcache_next_rdy(0) {
+        clint.resize(0x10000);
         itim.resize(itim_cap);
         rom.resize(rom_cap);
         memory.resize(ram_cap);
         core->icache_rdy = 0;
         core->dcache_rdy = 0;
+        irq_flag = 0;
     }
 
     void load_image_from_file(FILE *img_file, size_t mem_off, size_t len = 0) {
@@ -92,25 +98,36 @@ class SimulatedRAM {
         {
             if (icache_next_rdy == 0)
             {
-                //auto addr = core->icache_addr - rom_addr;
-                auto addr = core->icache_addr - rom_addr;
-                if (addr + 4 >= rom.capacity()) {
-                    printf("%x\n", addr);
+                uint8_t *m = NULL;
+                auto addr = core->icache_addr;
+                if (addr >= rom_addr && addr < rom_addr + rom.capacity()) {
+                    addr -= rom_addr;
+                    m = &rom[0];
+                } else if (addr >= itim_addr && addr < itim_addr + itim.capacity()) {
+                    addr -= itim_addr;
+                    m = &itim[0];
+                } else {
+                    printf("unknown icache addr %x\n", addr);
+                    assert(false);
                 }
-                assert(addr + 4 < rom.capacity());
                 core->icache_data = \
-                    rom[addr] |
-                    (rom[addr + 1] << 8) |
-                    (rom[addr + 2] << 16) |
-                    (rom[addr + 3] << 24);
-                //printf("%x %x %08x\n", core->icache_addr, addr, core->icache_data);
+                    m[addr] |
+                    (m[addr + 1] << 8) |
+                    (m[addr + 2] << 16) |
+                    (m[addr + 3] << 24);
+                //printf("ins\t%x %x %08x\n", core->icache_addr, addr, core->icache_data);
                 core->icache_rdy = 1;
                 icache_state = 0;
                 debug("icache: read byte @ %08x = %08x\n",
                       core->icache_addr, core->icache_data);
-                schedule_next_icache_rdy(1);
-            } else icache_next_rdy--;
+                schedule_next_icache_rdy(6);
+            } else {
+                debug("delayed icache response: %lu\n", icache_next_rdy);
+                icache_next_rdy--;
+            }
         }
+                        core->irq = 0;
+
 
         if (dcache_state == 0)
         {
@@ -142,6 +159,7 @@ class SimulatedRAM {
                         if (!system_init) core->dcache_rdata = -1;
                         else {
                             core->dcache_rdata = getchar();
+                            //core->dcache_rdata = '1';
                             core->dcache_rdy = 1;
                         }
                         system_init ++;
@@ -153,6 +171,7 @@ class SimulatedRAM {
                     } 
                 }else {
                     uint8_t *m = NULL;
+                    
                     if (addr >= rom_addr && addr < rom_addr + rom.capacity()) {
                         m = &rom[0];
                         addr -= rom_addr;
@@ -164,14 +183,25 @@ class SimulatedRAM {
                             m = &memory[0];
                             addr -= ram_addr;
                             assert(addr < memory.capacity());
-
                         } else if (addr >= itim_addr && addr < itim_addr + itim.capacity()) {
                             m = &itim[0];
                             addr -= itim_addr;
                             assert(addr < itim.capacity());
+                        } else if (addr >= clint_addr && addr < clint_addr + clint.capacity()) {
+                            //m = &clint[0];
+                            //addr -= clint_addr;
+                            if (addr == 0x02000000 && data == 1) {
+                                //printf("core irq\n");
+                                core->irq = data;
+                                irq_flag ++;
+                            }
                         } else {
-                            printf("unknown %x\n", addr);
+                            //printf("unknown %08x\n", addr);
+                            //assert(false);
                         }
+
+                        //if (irq_flag >= 3) irq_flag ++;
+                        //assert(irq_flag < 10);
 
                         if (m) {
                             if (core->dcache_wr)
@@ -207,7 +237,7 @@ class SimulatedRAM {
                 }
                 core->dcache_rdy = 1;
                 dcache_state = 0;
-                //schedule_next_dcache_rdy(1);
+                //schedule_next_dcache_rdy(6);
             } else {
                 debug("delayed dcache response: %lu\n", dcache_next_rdy);
                 dcache_next_rdy--;
@@ -222,12 +252,6 @@ class SimulatedRAM {
     void schedule_next_dcache_rdy(uint64_t nstep) {
         dcache_next_rdy = nstep;
     }
-
-    /*
-       uint8_t *get_framebuffer() {
-       return &framebuffer[0];
-       }
-       */
 
     uint8_t *get_ram() {
         return &memory[0];

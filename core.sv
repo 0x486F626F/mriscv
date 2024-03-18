@@ -157,6 +157,8 @@ module fetcher(
     output ctrl_fetcher_stall
 );
     logic [31:0] pc;
+    logic ctrl_trap_reg;
+    logic [31:0] pc_exc_target_reg;
 
     wire ins_aligned = pc[1:0] == 0;
     assign icache_addr = pc;
@@ -169,6 +171,11 @@ module fetcher(
                 $time, m, prefix, pc, pc_jump_target, ctrl_jump, pc_exc_target, ctrl_trap)
     `endif
     always_ff @ (posedge ctrl_clk) begin
+        if (ctrl_trap && ctrl_stall && !ctrl_trap_reg) begin
+            ctrl_trap_reg <= 1;
+            pc_exc_target_reg <= pc_exc_target;
+        end
+
         if (ctrl_reset) begin
             `ifdef PIPELINE_DEBUG
                 $display("[%0t] reset pc", $time);
@@ -179,11 +186,15 @@ module fetcher(
             `ifdef PIPELINE_DEBUG
                 `if_print_stat("*", "works");
             `endif
-            pc <= ctrl_trap ? pc_exc_target : next_pc;
+            //pc <= (ctrl_trap || ctrl_trap_reg) ? pc_exc_target : next_pc;
+            pc <= ctrl_trap_reg? pc_exc_target_reg : ctrl_trap? pc_exc_target : next_pc;
+            //pc <= ctrl_trap? pc_exc_target : ctrl_trap_reg? pc_exc_target_reg : next_pc;
+            ctrl_trap_reg <= 0;
             inst_reg <= icache_data;
             pc_reg <= pc;
             exc_reg <= {5'b0, !ins_aligned} << `EXC_REG_INS_ALIGN;
-            ctrl_nop_reg <= 0;
+            //ctrl_nop_reg <= 0;
+            ctrl_nop_reg <= (ctrl_trap || ctrl_trap_reg);
         end else begin
             `ifdef PIPELINE_DEBUG
                 `if_print_stat("=", "stalls");
@@ -462,7 +473,7 @@ module decoder(
                 pc_reg <= pc;
                 ctrl_mret_reg <= opcode == `SYS && mret;
                 ctrl_wfi_reg <= is_wfi;
-                ctrl_skip_next_reg <= ctrl_jump;
+                ctrl_skip_next_reg <= (ctrl_jump || mret);
             end else begin // NOP or a bubble
                 `ifdef PIPELINE_DEBUG
                     $display("[%0t]  [ID ] idle", $time);
@@ -659,13 +670,13 @@ module memory(
     wire meip_clear = (!ctrl_nop) && valid && dcache_wr &&
                       (mreg_addr == 'b111 && dcache_wdata != 0);
     assign ctrl_ext_irq = (meip_clear ? 0 : meip) || ctrl_ext_irq_trigger;
-    assign ctrl_sw_irq = msip;
+    assign ctrl_sw_irq = msip || ctrl_ext_irq_trigger;
 
     wire [2:0] mreg_addr = dcache_addr[31:3] == `MTIME_ADDR ?    'b001 :
                            dcache_addr[31:3] == `MTIMECMP_ADDR ? 'b101 :
                            dcache_addr[31:2] == `MSIP_ADDR ?     'b011 :
                            dcache_addr[31:2] == `EIRQ_CTL_ADDR ? 'b111 : 0;
-    assign ctrl_timer_irq = mtime_regs[0] >= mtime_regs[1];
+    assign ctrl_timer_irq = 0;//mtime_regs[0] >= mtime_regs[1];
 
     wire aligned = dcache_ws == 2'b01 ? (dcache_addr[0] == 0) :
                    dcache_ws == 2'b10 ? (dcache_addr[1:0] == 0) : 1;
@@ -844,7 +855,8 @@ module writeback(
     assign csr_trap_pc = pc;
     assign csr_trap_info = {!is_exc, cause};
     assign ctrl_pc_exc_target = is_trap ? (csr_rdata[0] ? (mtvec_base + {26'b0, cause, 2'b0}) : mtvec_base) :
-                                          (csr_rdata + 4);
+                                            csr_rdata;
+                                          //(ctrl_mret ? csr_rdata : csr_rdata + 4);
     assign ctrl_trap = is_trap || is_mret; // traps and mret will clear the pipeline
     assign ctrl_wfi_stall = (!ctrl_nop) && ctrl_wfi && (!is_trap);
     `ifdef PIPELINE_DEBUG

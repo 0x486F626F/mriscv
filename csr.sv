@@ -118,6 +118,8 @@ module csr(
         `read_csr(raddr, `CSR_MCAUSE, mcause) : \
         `read_csr(raddr, `CSR_MTVAL, mtval) : \
         (raddr == `CSR_MIP) ? {_mip, 1'b1} : \
+        (raddr == `CSR_PMPCFG0) ? 00000000_00000000_00000000_00000000_1 : \
+        (raddr == `CSR_PMPADDR0) ? 00000000_00000000_00000000_00000000_1 : \
         `read_csr(raddr, `CSR_MHARTID, mhartid) : 33'b0)
 
 
@@ -159,7 +161,7 @@ module csr(
                         $time, trap_mstatus, trap_pc, trap_mcause);
                 `endif
                 mstatus <= trap_mstatus;
-                mepc <= trap_pc;
+                mepc <= trap_pc+8;
                 mcause <= trap_mcause;
             end
         end else if (wen) begin
